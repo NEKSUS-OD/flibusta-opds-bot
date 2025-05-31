@@ -1,12 +1,12 @@
 import logging
 import aiohttp
+from aiohttp import web
 import asyncio
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
 import xml.etree.ElementTree as ET
 
-# Вставьте сюда свой токен Telegram-бота
 TOKEN = "7346488642:AAG3yOPQXT2Qo0Elxudrjq2cvVfC_BGxP0g"
 OPDS_BASE_URL = "http://proxy.flibusta.net/opds"
 
@@ -18,7 +18,7 @@ class OpdsBot:
         self.search_results = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("📚 Привет! Напиши название книги или имя автора — я попробую её найти.")
+        await update.message.reply_text("📚 Привет! Напиши название книги или автора, попробуем найти.")
 
     async def fetch_entries(self, url):
         async with aiohttp.ClientSession() as session:
@@ -28,9 +28,9 @@ class OpdsBot:
                     return None
                 xml_data = await response.text()
 
-        # Сохраняем ответ в файл (для отладки)
         with open("last_response.xml", "w", encoding="utf-8") as f:
             f.write(xml_data)
+        logger.info("Сохранён последний ответ в last_response.xml")
 
         root = ET.fromstring(xml_data)
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
@@ -58,24 +58,6 @@ class OpdsBot:
 
         real_books = [e for e in entries if has_acquisition(e)]
 
-        # Если настоящих книг нет — пробуем перейти по вложенным ссылкам
-        if not real_books:
-            sub_links = []
-            for e in entries:
-                for l in e.findall('atom:link', ns):
-                    href = l.attrib.get('href', '')
-                    if href:
-                        full_url = urljoin(OPDS_BASE_URL, href)
-                        sub_links.append(full_url)
-
-            for sub_url in sub_links:
-                sub_entries = await self.fetch_entries(sub_url)
-                if sub_entries is None:
-                    continue
-                for e in sub_entries:
-                    if has_acquisition(e):
-                        real_books.append(e)
-
         if not real_books:
             await update.message.reply_text("Книги не найдены.")
             return
@@ -85,18 +67,14 @@ class OpdsBot:
         reply_text = "🔍 Найдено:\n\n"
 
         for entry in real_books[:10]:
-            title_el = entry.find('atom:title', ns)
-            if title_el is None:
-                continue
-            title = title_el.text
-
+            title = entry.find('atom:title', ns).text
             author_el = entry.find('atom:author/atom:name', ns)
             author = author_el.text if author_el is not None else "Неизвестен"
 
             link = None
             for l in entry.findall('atom:link', ns):
                 if "acquisition" in l.attrib.get('rel', ''):
-                    link = urljoin(OPDS_BASE_URL, l.attrib.get('href'))
+                    link = l.attrib.get('href')
                     break
 
             if not link:
@@ -137,6 +115,18 @@ class OpdsBot:
 
         await query.edit_message_text(text=text, parse_mode="HTML")
 
+async def start_webserver():
+    async def handle(request):
+        return web.Response(text="Bot is running")
+
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    logger.info("HTTP сервер запущен на порту 8080")
+
 async def main():
     bot = OpdsBot()
     app = Application.builder().token(TOKEN).build()
@@ -145,8 +135,11 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search))
     app.add_handler(CallbackQueryHandler(bot.button))
 
-    print("✅ Бот запущен.")
-    await app.run_polling()
+    # Запускаем одновременно веб-сервер и polling бота
+    await asyncio.gather(
+        start_webserver(),
+        app.run_polling()
+    )
 
 if __name__ == "__main__":
     import nest_asyncio
