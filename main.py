@@ -1,7 +1,7 @@
 import logging
 import aiohttp
-from aiohttp import web
 import asyncio
+from aiohttp import web
 from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
@@ -18,7 +18,7 @@ class OpdsBot:
         self.search_results = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("📚 Привет! Напиши название книги или автора, попробуем найти.")
+        await update.message.reply_text("📚 Привет! Напиши название книги или автора, и я попробую её найти.")
 
     async def fetch_entries(self, url):
         async with aiohttp.ClientSession() as session:
@@ -30,7 +30,6 @@ class OpdsBot:
 
         with open("last_response.xml", "w", encoding="utf-8") as f:
             f.write(xml_data)
-        logger.info("Сохранён последний ответ в last_response.xml")
 
         root = ET.fromstring(xml_data)
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
@@ -42,7 +41,7 @@ class OpdsBot:
             await update.message.reply_text("Введите название книги или автора.")
             return
 
-        url = f"{OPDS_BASE_URL}/search?searchTerm={quote(query)}"
+        url = f"{OPDS_BASE_URL}/search?query={quote(query)}"
         entries = await self.fetch_entries(url)
         if entries is None:
             await update.message.reply_text("Ошибка при получении данных.")
@@ -57,6 +56,24 @@ class OpdsBot:
             return False
 
         real_books = [e for e in entries if has_acquisition(e)]
+
+        if not real_books:
+            sub_links = []
+            for e in entries:
+                for l in e.findall('atom:link', ns):
+                    rel = l.attrib.get('rel', '')
+                    type_ = l.attrib.get('type', '')
+                    href = l.attrib.get('href', '')
+                    if rel == 'subsection' or type_ == 'application/atom+xml':
+                        sub_links.append(href)
+
+            for sub_url in sub_links:
+                sub_entries = await self.fetch_entries(sub_url)
+                if sub_entries is None:
+                    continue
+                for e in sub_entries:
+                    if has_acquisition(e):
+                        real_books.append(e)
 
         if not real_books:
             await update.message.reply_text("Книги не найдены.")
@@ -115,19 +132,7 @@ class OpdsBot:
 
         await query.edit_message_text(text=text, parse_mode="HTML")
 
-async def start_webserver():
-    async def handle(request):
-        return web.Response(text="Bot is running")
-
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    logger.info("HTTP сервер запущен на порту 8080")
-
-async def main():
+async def start_bot():
     bot = OpdsBot()
     app = Application.builder().token(TOKEN).build()
 
@@ -135,11 +140,29 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search))
     app.add_handler(CallbackQueryHandler(bot.button))
 
-    # Запускаем одновременно веб-сервер и polling бота
-    await asyncio.gather(
-        start_webserver(),
-        app.run_polling()
-    )
+    print("✅ Бот запущен.")
+    await app.initialize()
+    await app.start()
+    return app
+
+# Веб-сервер для Render
+async def web_server():
+    async def handle(request):
+        return web.Response(text="✅ Бот работает!", content_type="text/plain")
+    
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+    print("🌐 Веб-сервер запущен на порту 10000.")
+
+async def main():
+    tg_app = await start_bot()
+    await web_server()
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     import nest_asyncio
