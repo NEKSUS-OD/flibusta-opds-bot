@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: flibusta-bot
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    autoDeploy: true
+    envVars:
+      - key: TOKEN
+        value: "7346488642:AAG3yOPQXT2Qo0Elxudrjq2cvVfC_BGxP0g"
