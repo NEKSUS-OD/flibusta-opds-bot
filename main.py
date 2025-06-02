@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 import xml.etree.ElementTree as ET
 
 TOKEN = "7346488642:AAG3yOPQXT2Qo0Elxudrjq2cvVfC_BGxP0g"
-OPDS_BASE_URL = "http://proxy.flibusta.net/opds"
+OPDS_BASE_URL = "http://flibusta.is/opds"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class OpdsBot:
         self.search_results = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("📚 Привет! Напиши название книги или автора, и я попробую её найти.")
+        await update.message.reply_text("📚 Шалом православный! Если ви хочете какую книжку то напишите мене шо ви хочете, и я таки попробую её найти.")
 
     async def fetch_entries(self, url):
         async with aiohttp.ClientSession() as session:
