@@ -1,14 +1,14 @@
 import logging
 import aiohttp
 import asyncio
-from aiohttp import web
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
 import xml.etree.ElementTree as ET
 
+# Вставьте сюда свой токен Telegram-бота
 TOKEN = "7346488642:AAG3yOPQXT2Qo0Elxudrjq2cvVfC_BGxP0g"
-OPDS_BASE_URL = "http://flibusta.is/opds"
+OPDS_BASE_URL = "http://proxy.flibusta.net/opds"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ class OpdsBot:
                     return None
                 xml_data = await response.text()
 
+        # Сохраняем ответ в файл (для отладки)
         with open("last_response.xml", "w", encoding="utf-8") as f:
             f.write(xml_data)
 
@@ -41,7 +42,7 @@ class OpdsBot:
             await update.message.reply_text("Введите название книги или автора.")
             return
 
-        url = f"{OPDS_BASE_URL}/search?query={quote(query)}"
+        url = f"{OPDS_BASE_URL}/search?searchTerm={quote(query)}"
         entries = await self.fetch_entries(url)
         if entries is None:
             await update.message.reply_text("Ошибка при получении данных.")
@@ -57,15 +58,15 @@ class OpdsBot:
 
         real_books = [e for e in entries if has_acquisition(e)]
 
+        # Если настоящих книг нет — пробуем перейти по вложенным ссылкам
         if not real_books:
             sub_links = []
             for e in entries:
                 for l in e.findall('atom:link', ns):
-                    rel = l.attrib.get('rel', '')
-                    type_ = l.attrib.get('type', '')
                     href = l.attrib.get('href', '')
-                    if rel == 'subsection' or type_ == 'application/atom+xml':
-                        sub_links.append(href)
+                    if href:
+                        full_url = urljoin(OPDS_BASE_URL, href)
+                        sub_links.append(full_url)
 
             for sub_url in sub_links:
                 sub_entries = await self.fetch_entries(sub_url)
@@ -84,14 +85,18 @@ class OpdsBot:
         reply_text = "🔍 Найдено:\n\n"
 
         for entry in real_books[:10]:
-            title = entry.find('atom:title', ns).text
+            title_el = entry.find('atom:title', ns)
+            if title_el is None:
+                continue
+            title = title_el.text
+
             author_el = entry.find('atom:author/atom:name', ns)
             author = author_el.text if author_el is not None else "Неизвестен"
 
             link = None
             for l in entry.findall('atom:link', ns):
                 if "acquisition" in l.attrib.get('rel', ''):
-                    link = l.attrib.get('href')
+                    link = urljoin(OPDS_BASE_URL, l.attrib.get('href'))
                     break
 
             if not link:
@@ -132,7 +137,7 @@ class OpdsBot:
 
         await query.edit_message_text(text=text, parse_mode="HTML")
 
-async def start_bot():
+async def main():
     bot = OpdsBot()
     app = Application.builder().token(TOKEN).build()
 
@@ -141,28 +146,7 @@ async def start_bot():
     app.add_handler(CallbackQueryHandler(bot.button))
 
     print("✅ Бот запущен.")
-    await app.initialize()
-    await app.start()
-    return app
-
-# Веб-сервер для Render
-async def web_server():
-    async def handle(request):
-        return web.Response(text="✅ Бот работает!", content_type="text/plain")
-    
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
-    await site.start()
-    print("🌐 Веб-сервер запущен на порту 10000.")
-
-async def main():
-    tg_app = await start_bot()
-    await web_server()
-    while True:
-        await asyncio.sleep(3600)
+    await app.run_polling()
 
 if __name__ == "__main__":
     import nest_asyncio
