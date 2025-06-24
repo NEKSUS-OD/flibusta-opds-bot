@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 import xml.etree.ElementTree as ET
 
 # Вставьте сюда свой токен Telegram-бота
-TOKEN = "7346488642:AAG3yOPQXT2Qo0Elxudrjq2cvVfC_BGxP0g"
+TOKEN = "000000000000000000000000000000"
 OPDS_BASE_URL = "http://proxy.flibusta.net/opds"
 
 logging.basicConfig(level=logging.INFO)
